@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch: {}
+  workflow_dispatch: {}   # allow manual trigger
 
 jobs:
   deploy:
@@ -14,6 +14,7 @@ jobs:
       AWS_REGION: ap-south-1
 
     steps:
+      # ---------- Checkout ----------
       - name: Checkout repo
         uses: actions/checkout@v4
 
@@ -25,20 +26,11 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
 
-      # ---------- Docker ----------
+      # ---------- Verify Docker ----------
       - name: Verify Docker
         run: |
           docker --version
           docker info
-
-      # ---------- Install Trivy ----------
-      - name: Install Trivy
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget
-          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.50.2_Linux-64bit.deb
-          sudo dpkg -i trivy_0.50.2_Linux-64bit.deb
-          trivy --version
 
       # ---------- Setup SSH Key ----------
       - name: Setup SSH key for EC2
@@ -48,7 +40,7 @@ jobs:
           chmod 600 ~/.ssh/devops-key
           ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
 
-      # ---------- Login to ECR ----------
+      # ---------- Login to AWS ECR ----------
       - name: Login to AWS ECR
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -56,30 +48,46 @@ jobs:
             | docker login --username AWS --password-stdin \
             $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-      # ---------- Build Images (Only Build Here) ----------
-      - name: Build Docker Images (No Push Yet)
+      # ---------- Build Images (Local Only, No Push Yet) ----------
+      - name: Build Docker Images (Frontend & Backend)
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          ECR_URL=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+          ECR_URL="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 
-          docker build -t $ECR_URL/sports-frontend:latest app/frontend
-          docker build -t $ECR_URL/sports-backend:latest app/backend
+          docker build -t sports-frontend:latest app/frontend
+          docker build -t sports-backend:latest app/backend
 
-      # ---------- Trivy Scan (BLOCK ON HIGH/CRITICAL) ----------
+      # ---------- Trivy Scan (FAILS PIPELINE IF VULNERABILITIES FOUND) ----------
       - name: Trivy Scan - Frontend Image
-        run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          ECR_URL=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
-          trivy image --exit-code 1 --severity HIGH,CRITICAL $ECR_URL/sports-frontend:latest
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: sports-frontend:latest
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
 
       - name: Trivy Scan - Backend Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: sports-backend:latest
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      # ---------- Tag & Push Images to ECR ----------
+      - name: Tag & Push Images to ECR
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          ECR_URL=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
-          trivy image --exit-code 1 --severity HIGH,CRITICAL $ECR_URL/sports-backend:latest
+          ECR_URL="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 
-      # ---------- Push & Deploy ----------
-      - name: Push Images & Deploy to EC2
+          docker tag sports-frontend:latest $ECR_URL/sports-frontend:latest
+          docker tag sports-backend:latest  $ECR_URL/sports-backend:latest
+
+          docker push $ECR_URL/sports-frontend:latest
+          docker push $ECR_URL/sports-backend:latest
+
+      # ---------- Deploy to EC2 ----------
+      - name: Deploy to EC2 (docker-compose)
         run: |
           chmod +x scripts/automate-aws.sh
           EC2_IP=${{ secrets.EC2_PUBLIC_IP }} \
