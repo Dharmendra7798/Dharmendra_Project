@@ -1,10 +1,10 @@
-name: CI/CD Deploy (ECR + Trivy + EC2)
+name: CI/CD Deploy (ECR + EC2 + Trivy)
 
 on:
   push:
     branches:
       - main
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -16,7 +16,6 @@ jobs:
       FRONTEND_IMAGE: sports-frontend
 
     steps:
-      # ---------- Checkout ----------
       - name: Checkout repo
         uses: actions/checkout@v4
 
@@ -28,52 +27,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
 
-      # ---------- Docker ----------
-      - name: Verify Docker
-        run: |
-          docker --version
-          docker info
-
-      # ---------- Setup SSH Key ----------
-      - name: Setup SSH key for EC2
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/devops-key
-          chmod 600 ~/.ssh/devops-key
-          ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
-
-      # ---------- Build Backend ----------
-      - name: Build Backend Image
-        run: |
-          docker build -t $BACKEND_IMAGE:latest app/backend
-
-      # ---------- Trivy Scan Backend ----------
-      - name: Trivy Scan Backend Image
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.BACKEND_IMAGE }}:latest
-          format: table
-          severity: HIGH,CRITICAL
-          vuln-type: os,library
-          ignore-unfixed: true
-          exit-code: 1
-
-      # ---------- Build Frontend ----------
-      - name: Build Frontend Image
-        run: |
-          docker build -t $FRONTEND_IMAGE:latest app/frontend
-
-      # ---------- Trivy Scan Frontend ----------
-      - name: Trivy Scan Frontend Image
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.FRONTEND_IMAGE }}:latest
-          format: table
-          severity: HIGH,CRITICAL
-          vuln-type: os,library
-          ignore-unfixed: true
-          exit-code: 1
-
       # ---------- Login to ECR ----------
       - name: Login to AWS ECR
         run: |
@@ -83,26 +36,64 @@ jobs:
             | docker login --username AWS --password-stdin \
             $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-      # ---------- Tag & Push Backend ----------
-      - name: Push Backend Image to ECR
+      # ---------- Build Backend Image ----------
+      - name: Build Backend Image
         run: |
-          docker tag $BACKEND_IMAGE:latest \
-            $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_IMAGE:latest
-          docker push \
-            $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_IMAGE:latest
+          docker build -t $BACKEND_IMAGE:latest app/backend
 
-      # ---------- Tag & Push Frontend ----------
-      - name: Push Frontend Image to ECR
-        run: |
-          docker tag $FRONTEND_IMAGE:latest \
-            $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_IMAGE:latest
-          docker push \
-            $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_IMAGE:latest
+      # ---------- Trivy Scan Backend ----------
+      - name: Trivy Scan Backend Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: sports-backend:latest
+          format: table
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+          scanners: vuln
+          ignore-unfixed: true
+          exit-code: 1
 
-      # ---------- Deploy to EC2 ----------
-      - name: Deploy to EC2
+      # ---------- Build Frontend Image ----------
+      - name: Build Frontend Image
         run: |
-          chmod +x scripts/automate-aws.sh
-          EC2_IP=${{ secrets.EC2_PUBLIC_IP }} \
-          EC2_DNS=${{ secrets.EC2_PUBLIC_DNS }} \
-          ./scripts/automate-aws.sh
+          docker build \
+            --build-arg REACT_APP_API_URL=http://${{ secrets.EC2_PUBLIC_IP }}:5000 \
+            -t $FRONTEND_IMAGE:latest app/frontend
+
+      # ---------- Trivy Scan Frontend ----------
+      - name: Trivy Scan Frontend Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: sports-frontend:latest
+          format: table
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+          scanners: vuln
+          ignore-unfixed: true
+          exit-code: 1
+
+      # ---------- Push Images to ECR ----------
+      - name: Push Images to ECR
+        run: |
+          docker tag $BACKEND_IMAGE:latest $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_IMAGE:latest
+          docker tag $FRONTEND_IMAGE:latest $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_IMAGE:latest
+
+          docker push $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_IMAGE:latest
+          docker push $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_IMAGE:latest
+
+      # ---------- Setup SSH ----------
+      - name: Setup SSH key for EC2
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/devops-key
+          chmod 600 ~/.ssh/devops-key
+          ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
+
+      # ---------- Deploy on EC2 ----------
+      - name: Deploy on EC2
+        run: |
+          ssh -i ~/.ssh/devops-key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
+            cd ~/Dharmendra_Project
+            docker-compose -f docker-compose.prod.yml pull
+            docker-compose -f docker-compose.prod.yml up -d
+          EOF

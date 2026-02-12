@@ -1,26 +1,25 @@
-FROM node:20-alpine3.20
-
-# 🔐 Patch OS-level vulnerabilities
-RUN apk update && apk upgrade --no-cache
+FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy manifests first (better layer caching)
+# Upgrade npm to patched version (fixes tar/glob CVEs)
+RUN npm install -g npm@latest
+
+# Copy package files first
 COPY package*.json ./
 
-# 🔐 Install prod deps & patch vulnerable transitive deps
-RUN npm ci --omit=dev \
-  && npm audit fix --omit=dev || true \
-  && npm update glob cross-spawn tar || true
+# Install only prod deps
+RUN npm ci --omit=dev
 
-# Copy source code
+# Copy app source
 COPY . .
 
-EXPOSE 5000
-ENV NODE_ENV=production
-
-# 🧑‍💻 Run as non-root (extra security hardening)
+# Create non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
+
+EXPOSE 5000
+
+ENV NODE_ENV=production
 
 CMD ["node", "server.js"]
