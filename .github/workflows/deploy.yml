@@ -1,10 +1,10 @@
-name: CI/CD Deploy (ECR + EC2)
+name: CI/CD Deploy (ECR + EC2 + Trivy Scan)
 
 on:
   push:
     branches:
       - main
-  workflow_dispatch: {}   # allow manual trigger
+  workflow_dispatch: {}
 
 jobs:
   deploy:
@@ -31,6 +31,15 @@ jobs:
           docker --version
           docker info
 
+      # ---------- Install Trivy ----------
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget
+          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.50.2_Linux-64bit.deb
+          sudo dpkg -i trivy_0.50.2_Linux-64bit.deb
+          trivy --version
+
       # ---------- Setup SSH Key ----------
       - name: Setup SSH key for EC2
         run: |
@@ -47,8 +56,30 @@ jobs:
             | docker login --username AWS --password-stdin \
             $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-      # ---------- Build, Push, Deploy ----------
-      - name: Build, Push Images & Deploy to EC2
+      # ---------- Build Images (Only Build Here) ----------
+      - name: Build Docker Images (No Push Yet)
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URL=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+
+          docker build -t $ECR_URL/sports-frontend:latest app/frontend
+          docker build -t $ECR_URL/sports-backend:latest app/backend
+
+      # ---------- Trivy Scan (BLOCK ON HIGH/CRITICAL) ----------
+      - name: Trivy Scan - Frontend Image
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URL=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+          trivy image --exit-code 1 --severity HIGH,CRITICAL $ECR_URL/sports-frontend:latest
+
+      - name: Trivy Scan - Backend Image
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URL=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+          trivy image --exit-code 1 --severity HIGH,CRITICAL $ECR_URL/sports-backend:latest
+
+      # ---------- Push & Deploy ----------
+      - name: Push Images & Deploy to EC2
         run: |
           chmod +x scripts/automate-aws.sh
           EC2_IP=${{ secrets.EC2_PUBLIC_IP }} \
