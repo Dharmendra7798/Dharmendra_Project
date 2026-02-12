@@ -57,5 +57,5 @@ jobs:
 
       - name: Run full automation script
         run: |
-          chmod +x automate-aws.sh
-          ./automate-aws.sh
+          chmod +x scripts/automate-aws.sh
+          ./scripts/automate-aws.sh
