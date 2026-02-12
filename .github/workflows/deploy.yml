@@ -1,4 +1,4 @@
-name: CI/CD Deploy (Terraform + ECR + EC2)
+name: CI/CD Deploy (ECR + EC2)
 
 on:
   push:
@@ -11,7 +11,6 @@ jobs:
 
     env:
       AWS_REGION: ap-south-1
-      AWS_DEFAULT_REGION: ap-south-1
 
     steps:
       - name: Checkout repo
@@ -30,17 +29,6 @@ jobs:
           sudo systemctl start docker || true
           docker info
 
-      - name: Install Terraform
-        run: |
-          if ! command -v terraform >/dev/null 2>&1; then
-            TERRAFORM_VERSION=1.7.5
-            curl -fsSL https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip -o /tmp/terraform.zip
-            unzip -o /tmp/terraform.zip -d /tmp/terraform-bin
-            sudo mv /tmp/terraform-bin/terraform /usr/local/bin/terraform
-            sudo chmod +x /usr/local/bin/terraform
-          fi
-          terraform -v
-
       - name: Login to AWS ECR
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -48,11 +36,10 @@ jobs:
             | docker login --username AWS --password-stdin \
             $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-      - name: Set Terraform variables
-        run: |
-          echo "MY_IP=$(curl -s https://checkip.amazonaws.com)/32" >> $GITHUB_ENV
-
-      - name: Run automation script (build + push + terraform + deploy)
+      # ✅ THIS IS THE PART YOU ASKED ABOUT (FULL STEP)
+      - name: Run deploy script
         run: |
           chmod +x scripts/automate-aws.sh
-          ./scripts/automate-aws.sh "$MY_IP"
+          EC2_IP=${{ secrets.EC2_PUBLIC_IP }} \
+          EC2_DNS=${{ secrets.EC2_PUBLIC_DNS }} \
+          ./scripts/automate-aws.sh
