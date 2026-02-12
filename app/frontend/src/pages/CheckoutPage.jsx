@@ -30,8 +30,9 @@ const paymentOptions = [
   { label: 'Cash on Delivery (COD)', value: 'COD' },
 ];
 
-// ✅ FIX: Use env var correctly with fallback
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+// ✅ PROD FIX: Backend URL (EC2 public IP fallback)
+const API_URL =
+  process.env.REACT_APP_API_URL || "http://65.1.18.39:5000";
 
 const CheckoutPage = () => {
   const navigate = useNavigate();
@@ -106,16 +107,14 @@ const CheckoutPage = () => {
         navigate('/order-confirmation');
       } else {
         const errorMessage =
-          savedOrder?.message || 'An unknown error occurred during order submission.';
+          savedOrder?.message || 'Order submission failed.';
         setStatus({ loading: false, error: errorMessage });
         dispatch(setOrderError(errorMessage));
       }
     } catch (error) {
-      const errorMessage =
-        'Network error or connection failed. Ensure the backend is running.';
       console.error('Checkout Error:', error);
-      setStatus({ loading: false, error: errorMessage });
-      dispatch(setOrderError(errorMessage));
+      setStatus({ loading: false, error: 'Backend not reachable' });
+      dispatch(setOrderError('Backend not reachable'));
     }
   };
 
@@ -134,7 +133,7 @@ const CheckoutPage = () => {
 
       {status.error && (
         <Alert severity="error" sx={{ mb: 3 }}>
-          Order Submission Failed: {status.error}
+          {status.error}
         </Alert>
       )}
 
@@ -166,7 +165,7 @@ const CheckoutPage = () => {
               </Typography>
 
               <FormControl component="fieldset" fullWidth sx={{ mt: 1 }}>
-                <FormLabel component="legend">Select Payment Option (Simulation Only)</FormLabel>
+                <FormLabel>Select Payment Option</FormLabel>
                 <RadioGroup name="paymentMethod" value={paymentMethod} onChange={handlePaymentChange} sx={{ flexDirection: 'row', gap: 2 }}>
                   {paymentOptions.map((option) => (
                     <FormControlLabel key={option.value} value={option.value} control={<Radio size="small" />} label={option.label} />
@@ -178,17 +177,9 @@ const CheckoutPage = () => {
 
           <Grid item xs={12} md={5}>
             <Paper elevation={3} sx={{ p: 3, position: 'sticky', top: 20 }}>
-              <Typography variant="h5" gutterBottom>
-                Order Summary
-              </Typography>
-
-              <Box sx={{ my: 2 }}>
-                <Typography variant="body1">Items: {cartItems.length}</Typography>
-                <Typography variant="body1">Payment Method: {paymentMethod}</Typography>
-                <Typography variant="h4" color="primary">
-                  {formatPrice(cartTotal)}
-                </Typography>
-              </Box>
+              <Typography variant="h5">Order Summary</Typography>
+              <Typography>Items: {cartItems.length}</Typography>
+              <Typography>Total: {formatPrice(cartTotal)}</Typography>
 
               <Button
                 type="submit"
@@ -197,9 +188,9 @@ const CheckoutPage = () => {
                 color="secondary"
                 size="large"
                 disabled={status.loading || !isFormValid}
-                startIcon={status.loading ? <CircularProgress size={20} color="inherit" /> : null}
+                sx={{ mt: 2 }}
               >
-                {status.loading ? 'Placing Order...' : `Place Order Now (${formatPrice(cartTotal)})`}
+                {status.loading ? 'Placing Order...' : 'Place Order'}
               </Button>
             </Paper>
           </Grid>

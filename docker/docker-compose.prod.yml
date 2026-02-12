@@ -1,12 +1,25 @@
 version: "3.8"
 
 services:
+  mongo:
+    image: mongo:6
+    container_name: mongo
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
   backend:
     image: 641791054325.dkr.ecr.ap-south-1.amazonaws.com/sports-backend:latest
     container_name: sports_backend
     restart: always
     ports:
       - "5000:5000"
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/sportsdb
+    depends_on:
+      - mongo
 
   frontend:
     image: 641791054325.dkr.ecr.ap-south-1.amazonaws.com/sports-frontend:latest
@@ -16,3 +29,6 @@ services:
       - "80:80"
     depends_on:
       - backend
+
+volumes:
+  mongo_data:

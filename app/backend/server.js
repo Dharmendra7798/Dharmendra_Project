@@ -12,7 +12,7 @@ import orderRoutes from "./routes/orderRoutes.js";
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// 🔥 IMPORTANT: Support both env names + fallback
+// ✅ Support both env names + docker fallback
 const MONGO_URI =
   process.env.MONGO_URI ||
   process.env.MONGODB_URI ||
@@ -41,8 +41,10 @@ mongoose
   .connect(MONGO_URI)
   .then(() => {
     console.log("✅ MongoDB Connected successfully!");
-    app.listen(PORT, () => {
-      console.log(`🚀 Backend running on port ${PORT}`);
+
+    // 🔥 IMPORTANT FIX (bind to all interfaces)
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`🚀 Backend running on 0.0.0.0:${PORT}`);
     });
   })
   .catch((err) => {
