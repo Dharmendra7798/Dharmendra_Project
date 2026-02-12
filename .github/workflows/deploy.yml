@@ -30,20 +30,21 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
-      # GitHub runners already have Docker. This step ensures Docker daemon is running.
+      # Docker is preinstalled on GitHub runners; just ensure daemon is up
       - name: Ensure Docker is running
         run: |
           docker --version
           sudo systemctl start docker || true
           docker info
 
-      - name: Install Terraform (non-interactive)
+      - name: Install Terraform (non-interactive, collision-safe)
         run: |
           if ! command -v terraform >/dev/null 2>&1; then
             TERRAFORM_VERSION=1.7.5
-            curl -sSLO https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
-            unzip -o terraform_${TERRAFORM_VERSION}_linux_amd64.zip
-            sudo mv terraform /usr/local/bin/terraform
+            curl -sSLo /tmp/terraform.zip https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+            unzip -o /tmp/terraform.zip -d /tmp/terraform-bin
+            sudo mv /tmp/terraform-bin/terraform /usr/local/bin/terraform
+            sudo chmod +x /usr/local/bin/terraform
           fi
           terraform -v
 
