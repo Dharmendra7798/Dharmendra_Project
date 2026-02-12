@@ -29,16 +29,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
-      - name: Install dependencies (Docker, Terraform)
+      - name: Install dependencies (Terraform)
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y docker.io unzip curl
-          sudo systemctl start docker
-
+          terraform -v || {
           TERRAFORM_VERSION=1.7.5
           curl -LO https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
           unzip terraform_${TERRAFORM_VERSION}_linux_amd64.zip
           sudo mv terraform /usr/local/bin/terraform
+          }
 
       - name: Login to ECR
         run: |
