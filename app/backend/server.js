@@ -1,43 +1,51 @@
-import express from 'express';
-import dotenv from 'dotenv';
-import mongoose from 'mongoose';
-import cors from 'cors';
+import express from "express";
+import dotenv from "dotenv";
+import mongoose from "mongoose";
+import cors from "cors";
 
-// Load environment variables from .env file
+// Load env (works locally; in Docker env comes from docker-compose)
 dotenv.config();
 
-// Import Routes
-import orderRoutes from './routes/orderRoutes.js';
+// Routes
+import orderRoutes from "./routes/orderRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGO_URI;
+
+// 🔥 IMPORTANT: Support both env names + fallback
+const MONGO_URI =
+  process.env.MONGO_URI ||
+  process.env.MONGODB_URI ||
+  "mongodb://mongo:27017/sportsdb"; // docker-compose service name
 
 // --- Middleware ---
-app.use(cors({
-  origin: "http://localhost:3000",
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],     credentials: true
-}));
-app.use(express.json()); // Body parser for JSON data
+app.use(
+  cors({
+    origin: "*", // change later for prod domain
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+    credentials: true,
+  })
+);
+
+app.use(express.json());
 
 // --- Routes ---
-app.use('/api/orders', orderRoutes);
+app.use("/api/orders", orderRoutes);
 
-app.get('/', (req, res) => {
-    res.send('Sports Accessories API is running...');
+app.get("/", (req, res) => {
+  res.send("Sports Accessories API is running...");
 });
 
 // --- Database Connection ---
 mongoose
   .connect(MONGO_URI)
   .then(() => {
-    console.log('MongoDB Connected successfully!');
-    // Start the server only after successful database connection
-    app.listen(process.env.PORT, () => {
-      console.log(`Backend running at ${process.env.SERVER_URL}:${process.env.PORT}`);
+    console.log("✅ MongoDB Connected successfully!");
+    app.listen(PORT, () => {
+      console.log(`🚀 Backend running on port ${PORT}`);
     });
   })
   .catch((err) => {
-    console.error('MongoDB connection error:', err.message);
+    console.error("❌ MongoDB connection error:", err.message);
     process.exit(1);
   });
