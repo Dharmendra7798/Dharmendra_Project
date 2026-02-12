@@ -4,8 +4,7 @@ on:
   push:
     branches:
       - main
-
-  workflow_dispatch:   # Manual trigger from GitHub UI
+  workflow_dispatch: {}   # allow manual trigger
 
 jobs:
   deploy:
@@ -18,6 +17,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # ---------- AWS Credentials ----------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -25,6 +25,13 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
 
+      # ---------- Docker ----------
+      - name: Verify Docker
+        run: |
+          docker --version
+          docker info
+
+      # ---------- Setup SSH Key ----------
       - name: Setup SSH key for EC2
         run: |
           mkdir -p ~/.ssh
@@ -32,12 +39,7 @@ jobs:
           chmod 600 ~/.ssh/devops-key
           ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
 
-      - name: Ensure Docker is running
-        run: |
-          docker --version
-          sudo systemctl start docker || true
-          docker info
-
+      # ---------- Login to ECR ----------
       - name: Login to AWS ECR
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -45,7 +47,8 @@ jobs:
             | docker login --username AWS --password-stdin \
             $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-      - name: Run deploy script
+      # ---------- Build, Push, Deploy ----------
+      - name: Build, Push Images & Deploy to EC2
         run: |
           chmod +x scripts/automate-aws.sh
           EC2_IP=${{ secrets.EC2_PUBLIC_IP }} \

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fully automated CI/CD script: Terraform + ECR + EC2 + Docker deploy
+# Fully automated CI/CD deploy: Build -> Push to ECR -> Deploy on EC2 (Docker Compose)
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -26,16 +26,17 @@ EC2_DNS="${EC2_DNS:?❌ EC2_DNS not set}"
 SSH_KEY="$HOME/.ssh/devops-key"
 
 echo "🚀 Starting deployment pipeline..."
-echo "🌍 AWS Region: $AWS_REGION"
-echo "🖥 EC2 IP: $EC2_IP"
-echo "🌐 EC2 DNS: $EC2_DNS"
+echo "🌍 AWS Region : $AWS_REGION"
+echo "🖥 EC2 IP     : $EC2_IP"
+echo "🌐 EC2 DNS    : $EC2_DNS"
 
 ### ---------- CHECKS ----------
 command -v aws >/dev/null || { echo "❌ AWS CLI not found"; exit 1; }
 command -v docker >/dev/null || { echo "❌ Docker not found"; exit 1; }
+[[ -f "$SSH_KEY" ]] || { echo "❌ SSH key not found at $SSH_KEY"; exit 1; }
 
-### ---------- ECR LOGIN ----------
-echo "🔐 Logging into ECR..."
+### ---------- LOGIN TO ECR ----------
+echo "🔐 Logging into AWS ECR..."
 aws ecr get-login-password --region "$AWS_REGION" \
   | docker login --username AWS --password-stdin "$ECR_URL"
 
@@ -51,9 +52,12 @@ echo "📤 Pushing images to ECR..."
 docker push "$IMAGE_FRONTEND"
 docker push "$IMAGE_BACKEND"
 
-### ---------- CREATE docker-compose.prod.yml ----------
+### ---------- GENERATE docker-compose.prod.yml ----------
+echo "📝 Generating docker-compose.prod.yml..."
+
 cat > /tmp/docker-compose.prod.yml <<EOF
 version: "3.8"
+
 services:
   backend:
     image: $IMAGE_BACKEND
@@ -70,25 +74,29 @@ services:
       - "80:80"
 EOF
 
-### ---------- DEPLOY TO EC2 ----------
+### ---------- COPY TO EC2 ----------
 echo "📡 Copying docker-compose to EC2..."
 scp -o StrictHostKeyChecking=no -i "$SSH_KEY" /tmp/docker-compose.prod.yml \
   "$EC2_USER@$EC2_IP:/home/$EC2_USER/docker-compose.yml"
 
+### ---------- DEPLOY ON EC2 ----------
 echo "🛠 Deploying on EC2..."
 ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_IP" <<EOF
-sudo apt-get update -y
-sudo apt-get install -y docker.io docker-compose
-sudo systemctl start docker
-sudo systemctl enable docker
+  set -e
+  sudo apt-get update -y
+  sudo apt-get install -y docker.io docker-compose
+  sudo systemctl start docker
+  sudo systemctl enable docker
 
-cd ~
-sudo docker login -u AWS -p \$(aws ecr get-login-password --region $AWS_REGION) $ECR_URL
-sudo docker-compose pull
-sudo docker-compose down
-sudo docker-compose up -d
-sudo docker ps
+  aws ecr get-login-password --region $AWS_REGION \
+    | sudo docker login --username AWS --password-stdin $ECR_URL
+
+  cd ~
+  sudo docker-compose pull
+  sudo docker-compose down
+  sudo docker-compose up -d
+  sudo docker ps
 EOF
 
 echo "✅ Deployment completed successfully!"
-echo "🌐 App URL: http://$EC2_DNS"
+echo "🌐 App is live at: http://$EC2_DNS"
