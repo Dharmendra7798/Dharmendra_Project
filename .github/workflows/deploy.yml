@@ -5,6 +5,8 @@ on:
     branches:
       - main
 
+  workflow_dispatch:   # Manual trigger from GitHub UI
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -23,6 +25,13 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
 
+      - name: Setup SSH key for EC2
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/devops-key
+          chmod 600 ~/.ssh/devops-key
+          ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
+
       - name: Ensure Docker is running
         run: |
           docker --version
@@ -36,7 +45,6 @@ jobs:
             | docker login --username AWS --password-stdin \
             $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-      # ✅ THIS IS THE PART YOU ASKED ABOUT (FULL STEP)
       - name: Run deploy script
         run: |
           chmod +x scripts/automate-aws.sh

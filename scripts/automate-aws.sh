@@ -6,105 +6,89 @@ IFS=$'\n\t'
 
 ### ---------- CONFIG ----------
 AWS_REGION="${AWS_REGION:-ap-south-1}"
-KEY_NAME="devops-key"
-INSTANCE_USER="ubuntu"
-
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-TF_DIR="$ROOT_DIR/terraform"
+ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 
 ECR_FRONTEND_NAME="sports-frontend"
 ECR_BACKEND_NAME="sports-backend"
 
-### ---------- INPUT ----------
-MY_IP="${1:-}"
-if [[ -z "$MY_IP" ]]; then
-  echo "❌ ERROR: my_ip not provided."
-  echo "Usage: ./scripts/automate-aws.sh <YOUR_PUBLIC_IP/32>"
-  exit 1
-fi
+ECR_URL="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+IMAGE_FRONTEND="$ECR_URL/$ECR_FRONTEND_NAME:latest"
+IMAGE_BACKEND="$ECR_URL/$ECR_BACKEND_NAME:latest"
 
-echo "🌍 Using MY_IP = $MY_IP"
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+FRONTEND_DIR="$ROOT_DIR/app/frontend"
+BACKEND_DIR="$ROOT_DIR/app/backend"
+
+EC2_USER="ubuntu"
+EC2_IP="${EC2_IP:?❌ EC2_IP not set}"
+EC2_DNS="${EC2_DNS:?❌ EC2_DNS not set}"
+
+SSH_KEY="$HOME/.ssh/devops-key"
+
+echo "🚀 Starting deployment pipeline..."
+echo "🌍 AWS Region: $AWS_REGION"
+echo "🖥 EC2 IP: $EC2_IP"
+echo "🌐 EC2 DNS: $EC2_DNS"
 
 ### ---------- CHECKS ----------
-command -v aws >/dev/null || { echo "❌ AWS CLI not installed"; exit 1; }
-command -v terraform >/dev/null || { echo "❌ Terraform not installed"; exit 1; }
-command -v docker >/dev/null || { echo "❌ Docker not installed"; exit 1; }
-
-aws sts get-caller-identity >/dev/null || { echo "❌ AWS credentials not configured"; exit 1; }
-
-### ---------- TERRAFORM (Infra + ECR) ----------
-echo "🌱 Applying Terraform (infra + ECR)..."
-cd "$TF_DIR"
-terraform init -input=false
-
-terraform apply -auto-approve \
-  -var="aws_region=$AWS_REGION" \
-  -var="key_name=$KEY_NAME" \
-  -var="my_ip=$MY_IP"
-
-EC2_IP="$(terraform output -raw ec2_public_ip)"
-EC2_DNS="$(terraform output -raw ec2_public_dns)"
-
-echo "🖥 EC2 Public IP  : $EC2_IP"
-echo "🌐 EC2 Public DNS : $EC2_DNS"
+command -v aws >/dev/null || { echo "❌ AWS CLI not found"; exit 1; }
+command -v docker >/dev/null || { echo "❌ Docker not found"; exit 1; }
 
 ### ---------- ECR LOGIN ----------
-ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-ECR_URL="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
-
 echo "🔐 Logging into ECR..."
 aws ecr get-login-password --region "$AWS_REGION" \
   | docker login --username AWS --password-stdin "$ECR_URL"
 
-IMAGE_FRONTEND="$ECR_URL/$ECR_FRONTEND_NAME:latest"
-IMAGE_BACKEND="$ECR_URL/$ECR_BACKEND_NAME:latest"
-
-### ---------- BUILD + PUSH ----------
+### ---------- BUILD IMAGES ----------
 echo "🐳 Building frontend image..."
-docker build -t "$IMAGE_FRONTEND" "$ROOT_DIR/app/frontend"
+docker build -t "$IMAGE_FRONTEND" "$FRONTEND_DIR"
 
 echo "🐳 Building backend image..."
-docker build -t "$IMAGE_BACKEND" "$ROOT_DIR/app/backend"
+docker build -t "$IMAGE_BACKEND" "$BACKEND_DIR"
 
+### ---------- PUSH IMAGES ----------
 echo "📤 Pushing images to ECR..."
 docker push "$IMAGE_FRONTEND"
 docker push "$IMAGE_BACKEND"
 
-### ---------- WAIT FOR EC2 SSH ----------
-echo "⏳ Waiting for EC2 SSH..."
-for i in {1..30}; do
-  if ssh -o StrictHostKeyChecking=no "$INSTANCE_USER@$EC2_IP" "echo ok" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 10
-done
+### ---------- CREATE docker-compose.prod.yml ----------
+cat > /tmp/docker-compose.prod.yml <<EOF
+version: "3.8"
+services:
+  backend:
+    image: $IMAGE_BACKEND
+    container_name: sports_backend
+    restart: always
+    ports:
+      - "5000:5000"
 
-### ---------- DEPLOY ON EC2 ----------
-echo "🚀 Deploying new containers on EC2..."
+  frontend:
+    image: $IMAGE_FRONTEND
+    container_name: sports_frontend
+    restart: always
+    ports:
+      - "80:80"
+EOF
 
-ssh -o StrictHostKeyChecking=no "$INSTANCE_USER@$EC2_IP" <<EOF
-set -e
+### ---------- DEPLOY TO EC2 ----------
+echo "📡 Copying docker-compose to EC2..."
+scp -o StrictHostKeyChecking=no -i "$SSH_KEY" /tmp/docker-compose.prod.yml \
+  "$EC2_USER@$EC2_IP:/home/$EC2_USER/docker-compose.yml"
 
-# Login to ECR
+echo "🛠 Deploying on EC2..."
+ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_IP" <<EOF
+sudo apt-get update -y
+sudo apt-get install -y docker.io docker-compose
+sudo systemctl start docker
+sudo systemctl enable docker
+
+cd ~
 sudo docker login -u AWS -p \$(aws ecr get-login-password --region $AWS_REGION) $ECR_URL
-
-# Pull latest images
-sudo docker pull $IMAGE_FRONTEND
-sudo docker pull $IMAGE_BACKEND
-
-# Stop and remove old containers if they exist
-sudo docker stop frontend || true
-sudo docker stop backend || true
-sudo docker rm frontend || true
-sudo docker rm backend || true
-
-# Run new containers
-sudo docker run -d --name backend -p 5000:5000 $IMAGE_BACKEND
-sudo docker run -d --name frontend -p 80:80 $IMAGE_FRONTEND
-
-# Show status
+sudo docker-compose pull
+sudo docker-compose down
+sudo docker-compose up -d
 sudo docker ps
 EOF
 
-echo "✅ Deployment complete!"
-echo "🌍 Application URL: http://$EC2_DNS"
+echo "✅ Deployment completed successfully!"
+echo "🌐 App URL: http://$EC2_DNS"
