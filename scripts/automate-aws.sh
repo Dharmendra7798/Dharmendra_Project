@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Fully automated CI/CD deploy: Build -> Push to ECR -> Deploy on EC2 (Docker Compose)
-
 set -euo pipefail
 IFS=$'\n\t'
 
-### ---------- CONFIG ----------
+# ---------- CONFIG ----------
 AWS_REGION="${AWS_REGION:-ap-south-1}"
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 
@@ -30,34 +28,31 @@ echo "🌍 AWS Region : $AWS_REGION"
 echo "🖥 EC2 IP     : $EC2_IP"
 echo "🌐 EC2 DNS    : $EC2_DNS"
 
-### ---------- CHECKS ----------
-command -v aws >/dev/null || { echo "❌ AWS CLI not found"; exit 1; }
-command -v docker >/dev/null || { echo "❌ Docker not found"; exit 1; }
-[[ -f "$SSH_KEY" ]] || { echo "❌ SSH key not found at $SSH_KEY"; exit 1; }
+# ---------- CHECKS ----------
+command -v aws >/dev/null || { echo "❌ AWS CLI not found on runner"; exit 1; }
+command -v docker >/dev/null || { echo "❌ Docker not found on runner"; exit 1; }
 
-### ---------- LOGIN TO ECR ----------
+# ---------- ECR LOGIN (Runner) ----------
 echo "🔐 Logging into AWS ECR..."
-aws ecr get-login-password --region "$AWS_REGION" \
-  | docker login --username AWS --password-stdin "$ECR_URL"
+ECR_PASSWORD="$(aws ecr get-login-password --region "$AWS_REGION")"
+echo "$ECR_PASSWORD" | docker login --username AWS --password-stdin "$ECR_URL"
 
-### ---------- BUILD IMAGES ----------
+# ---------- BUILD IMAGES ----------
 echo "🐳 Building frontend image..."
 docker build -t "$IMAGE_FRONTEND" "$FRONTEND_DIR"
 
 echo "🐳 Building backend image..."
 docker build -t "$IMAGE_BACKEND" "$BACKEND_DIR"
 
-### ---------- PUSH IMAGES ----------
+# ---------- PUSH IMAGES ----------
 echo "📤 Pushing images to ECR..."
 docker push "$IMAGE_FRONTEND"
 docker push "$IMAGE_BACKEND"
 
-### ---------- GENERATE docker-compose.prod.yml ----------
+# ---------- GENERATE docker-compose ----------
 echo "📝 Generating docker-compose.prod.yml..."
-
 cat > /tmp/docker-compose.prod.yml <<EOF
 version: "3.8"
-
 services:
   backend:
     image: $IMAGE_BACKEND
@@ -74,22 +69,21 @@ services:
       - "80:80"
 EOF
 
-### ---------- COPY TO EC2 ----------
+# ---------- COPY TO EC2 ----------
 echo "📡 Copying docker-compose to EC2..."
 scp -o StrictHostKeyChecking=no -i "$SSH_KEY" /tmp/docker-compose.prod.yml \
   "$EC2_USER@$EC2_IP:/home/$EC2_USER/docker-compose.yml"
 
-### ---------- DEPLOY ON EC2 ----------
+# ---------- DEPLOY ON EC2 ----------
 echo "🛠 Deploying on EC2..."
 ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_IP" <<EOF
-  set -e
   sudo apt-get update -y
   sudo apt-get install -y docker.io docker-compose
+
   sudo systemctl start docker
   sudo systemctl enable docker
 
-  aws ecr get-login-password --region $AWS_REGION \
-    | sudo docker login --username AWS --password-stdin $ECR_URL
+  echo "$ECR_PASSWORD" | sudo docker login --username AWS --password-stdin $ECR_URL
 
   cd ~
   sudo docker-compose pull
@@ -99,4 +93,4 @@ ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_IP" <<EOF
 EOF
 
 echo "✅ Deployment completed successfully!"
-echo "🌐 App is live at: http://$EC2_DNS"
+echo "🌐 App URL: http://$EC2_DNS"
