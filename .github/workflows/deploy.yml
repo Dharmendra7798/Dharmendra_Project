@@ -11,6 +11,7 @@ jobs:
 
     env:
       AWS_REGION: ap-south-1
+      AWS_DEFAULT_REGION: ap-south-1
 
     steps:
       - name: Checkout repo
@@ -29,21 +30,22 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
-      - name: Install dependencies (Terraform)
+      - name: Install Terraform (non-interactive)
         run: |
-          terraform -v || {
-          TERRAFORM_VERSION=1.7.5
-          curl -LO https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
-          unzip terraform_${TERRAFORM_VERSION}_linux_amd64.zip
-          sudo mv terraform /usr/local/bin/terraform
-          }
+          if ! command -v terraform >/dev/null 2>&1; then
+            TERRAFORM_VERSION=1.7.5
+            curl -sSLO https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+            unzip -o terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+            sudo mv terraform /usr/local/bin/terraform
+          fi
+          terraform -v
 
-      - name: Login to ECR
+      - name: Login to AWS ECR
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} \
+          aws ecr get-login-password --region $AWS_REGION \
             | docker login --username AWS --password-stdin \
-            $ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+            $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
       - name: Run full automation script
         run: |
