@@ -1,21 +1,26 @@
-# backend/Dockerfile (UPDATED & SECURE)
-FROM node:20-alpine3.19
+FROM node:20-alpine3.20
 
-# 🔐 Patch OS-level vulnerabilities (OpenSSL, etc.)
+# 🔐 Patch OS-level vulnerabilities
 RUN apk update && apk upgrade --no-cache
 
 WORKDIR /app
 
-# Copy dependency manifests
+# Copy manifests first (better layer caching)
 COPY package*.json ./
 
-# 🔒 Install prod deps & auto-fix known vuln deps where possible
-RUN npm ci --only=production && npm audit fix --production || true
+# 🔐 Install prod deps & patch vulnerable transitive deps
+RUN npm ci --omit=dev \
+  && npm audit fix --omit=dev || true \
+  && npm update glob cross-spawn tar || true
 
-# Copy source
+# Copy source code
 COPY . .
 
 EXPOSE 5000
 ENV NODE_ENV=production
+
+# 🧑‍💻 Run as non-root (extra security hardening)
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
 
 CMD ["node", "server.js"]

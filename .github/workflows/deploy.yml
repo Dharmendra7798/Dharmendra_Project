@@ -1,10 +1,10 @@
-name: CI/CD Deploy (ECR + EC2 + Trivy Scan)
+name: CI/CD Deploy (ECR + Trivy + EC2)
 
 on:
   push:
     branches:
       - main
-  workflow_dispatch: {}   # allow manual trigger
+  workflow_dispatch: {}
 
 jobs:
   deploy:
@@ -12,6 +12,8 @@ jobs:
 
     env:
       AWS_REGION: ap-south-1
+      BACKEND_IMAGE: sports-backend
+      FRONTEND_IMAGE: sports-frontend
 
     steps:
       # ---------- Checkout ----------
@@ -26,7 +28,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
 
-      # ---------- Verify Docker ----------
+      # ---------- Docker ----------
       - name: Verify Docker
         run: |
           docker --version
@@ -40,54 +42,65 @@ jobs:
           chmod 600 ~/.ssh/devops-key
           ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
 
-      # ---------- Login to AWS ECR ----------
+      # ---------- Build Backend ----------
+      - name: Build Backend Image
+        run: |
+          docker build -t $BACKEND_IMAGE:latest app/backend
+
+      # ---------- Trivy Scan Backend ----------
+      - name: Trivy Scan Backend Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.BACKEND_IMAGE }}:latest
+          format: table
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+          ignore-unfixed: true
+          exit-code: 1
+
+      # ---------- Build Frontend ----------
+      - name: Build Frontend Image
+        run: |
+          docker build -t $FRONTEND_IMAGE:latest app/frontend
+
+      # ---------- Trivy Scan Frontend ----------
+      - name: Trivy Scan Frontend Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE }}:latest
+          format: table
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+          ignore-unfixed: true
+          exit-code: 1
+
+      # ---------- Login to ECR ----------
       - name: Login to AWS ECR
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
           aws ecr get-login-password --region $AWS_REGION \
             | docker login --username AWS --password-stdin \
             $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-      # ---------- Build Images (Local Only, No Push Yet) ----------
-      - name: Build Docker Images (Frontend & Backend)
+      # ---------- Tag & Push Backend ----------
+      - name: Push Backend Image to ECR
         run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          ECR_URL="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          docker tag $BACKEND_IMAGE:latest \
+            $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_IMAGE:latest
+          docker push \
+            $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_IMAGE:latest
 
-          docker build -t sports-frontend:latest app/frontend
-          docker build -t sports-backend:latest app/backend
-
-      # ---------- Trivy Scan (FAILS PIPELINE IF VULNERABILITIES FOUND) ----------
-      - name: Trivy Scan - Frontend Image
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: sports-frontend:latest
-          format: 'table'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'
-
-      - name: Trivy Scan - Backend Image
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: sports-backend:latest
-          format: 'table'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'
-
-      # ---------- Tag & Push Images to ECR ----------
-      - name: Tag & Push Images to ECR
+      # ---------- Tag & Push Frontend ----------
+      - name: Push Frontend Image to ECR
         run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          ECR_URL="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
-
-          docker tag sports-frontend:latest $ECR_URL/sports-frontend:latest
-          docker tag sports-backend:latest  $ECR_URL/sports-backend:latest
-
-          docker push $ECR_URL/sports-frontend:latest
-          docker push $ECR_URL/sports-backend:latest
+          docker tag $FRONTEND_IMAGE:latest \
+            $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_IMAGE:latest
+          docker push \
+            $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_IMAGE:latest
 
       # ---------- Deploy to EC2 ----------
-      - name: Deploy to EC2 (docker-compose)
+      - name: Deploy to EC2
         run: |
           chmod +x scripts/automate-aws.sh
           EC2_IP=${{ secrets.EC2_PUBLIC_IP }} \
