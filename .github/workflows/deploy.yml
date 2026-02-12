@@ -1,4 +1,4 @@
-name: AWS DevOps Deployment
+name: CI/CD Deploy (Terraform + ECR + EC2)
 
 on:
   push:
@@ -9,35 +9,50 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
+    env:
+      AWS_REGION: ap-south-1
+      AWS_DEFAULT_REGION: ap-south-1
+
     steps:
-      - name: Checkout code
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install tools
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Ensure Docker is running
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y unzip curl docker.io
+          docker --version
+          sudo systemctl start docker || true
+          docker info
 
       - name: Install Terraform
         run: |
-          TERRAFORM_VERSION=1.7.5
-          curl -sSLO https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
-          unzip -o terraform_${TERRAFORM_VERSION}_linux_amd64.zip
-          sudo mv terraform /usr/local/bin/terraform
+          if ! command -v terraform >/dev/null 2>&1; then
+            TERRAFORM_VERSION=1.7.5
+            curl -fsSL https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip -o /tmp/terraform.zip
+            unzip -o /tmp/terraform.zip -d /tmp/terraform-bin
+            sudo mv /tmp/terraform-bin/terraform /usr/local/bin/terraform
+            sudo chmod +x /usr/local/bin/terraform
+          fi
           terraform -v
 
-      - name: Configure AWS
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: Login to AWS ECR
         run: |
-          aws configure set region ap-south-1
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          aws ecr get-login-password --region $AWS_REGION \
+            | docker login --username AWS --password-stdin \
+            $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-      - name: Run automation
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ap-south-1
+      - name: Set Terraform variables
+        run: |
+          echo "MY_IP=$(curl -s https://checkip.amazonaws.com)/32" >> $GITHUB_ENV
+
+      - name: Run automation script (build + push + terraform + deploy)
         run: |
           chmod +x scripts/automate-aws.sh
-          ./scripts/automate-aws.sh
+          ./scripts/automate-aws.sh "$MY_IP"
