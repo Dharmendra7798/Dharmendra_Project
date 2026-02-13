@@ -101,6 +101,6 @@ jobs:
               | sudo docker login --username AWS --password-stdin \
               $ACCOUNT_ID.dkr.ecr.ap-south-1.amazonaws.com
 
-            sudo docker-compose pull
-            sudo docker-compose up -d
+            sudo docker compose pull
+            sudo docker compose up -d
           EOF
