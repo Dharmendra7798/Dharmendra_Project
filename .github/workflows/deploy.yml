@@ -92,8 +92,9 @@ jobs:
       # ---------- Deploy on EC2 ----------
       - name: Deploy on EC2
         run: |
-          ssh -i ~/.ssh/devops-key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
-            cd ~/Dharmendra_Project
-            docker-compose -f docker-compose.prod.yml pull
-            docker-compose -f docker-compose.prod.yml up -d
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/devops-key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
+            set -e
+            cd /home/ubuntu
+            docker compose pull
+            docker compose up -d
           EOF
