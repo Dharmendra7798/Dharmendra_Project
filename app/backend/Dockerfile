@@ -1,13 +1,19 @@
-FROM node:20-alpine
+FROM node:20-alpine3.19
 
 WORKDIR /app
 
-RUN apk update && apk upgrade
+# Update OS packages to reduce CVEs
+RUN apk update && apk upgrade --no-cache
 
+# Copy only package files first (better caching)
 COPY package*.json ./
-RUN npm ci --omit=dev
 
+# Install only production dependencies
+RUN npm install --omit=dev
+
+# Copy app source
 COPY . .
 
 EXPOSE 5000
+
 CMD ["node", "server.js"]
