@@ -14,8 +14,10 @@ jobs:
       AWS_REGION: ap-south-1
       BACKEND_IMAGE: sports-backend
       FRONTEND_IMAGE: sports-frontend
+      ACCOUNT_ID: 641791054325
 
     steps:
+      # ---------- Checkout ----------
       - name: Checkout repo
         uses: actions/checkout@v4
 
@@ -30,13 +32,11 @@ jobs:
       # ---------- Login to ECR ----------
       - name: Login to AWS ECR
         run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
           aws ecr get-login-password --region $AWS_REGION \
             | docker login --username AWS --password-stdin \
             $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-      # ---------- Build Backend Image ----------
+      # ---------- Build Backend ----------
       - name: Build Backend Image
         run: |
           docker build -t $BACKEND_IMAGE:latest app/backend
@@ -46,14 +46,13 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: sports-backend:latest
-          format: table
           severity: HIGH,CRITICAL
           vuln-type: os,library
           scanners: vuln
           ignore-unfixed: true
           exit-code: 1
 
-      # ---------- Build Frontend Image ----------
+      # ---------- Build Frontend ----------
       - name: Build Frontend Image
         run: |
           docker build \
@@ -65,14 +64,13 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: sports-frontend:latest
-          format: table
           severity: HIGH,CRITICAL
           vuln-type: os,library
           scanners: vuln
           ignore-unfixed: true
           exit-code: 1
 
-      # ---------- Push Images to ECR ----------
+      # ---------- Tag & Push to ECR ----------
       - name: Push Images to ECR
         run: |
           docker tag $BACKEND_IMAGE:latest $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_IMAGE:latest
@@ -95,13 +93,13 @@ jobs:
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/devops-key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
             set -e
             cd /home/ubuntu
-            
-             # Login to AWS ECR on EC2 (token expires every 12 hours)
+
+            # Login to ECR (token expires every 12 hours)
             aws ecr get-login-password --region ap-south-1 \
               | sudo docker login --username AWS --password-stdin \
               641791054325.dkr.ecr.ap-south-1.amazonaws.com
 
-            # Pull latest images and restart containers
+            # Pull latest images & restart containers
             sudo docker-compose pull
             sudo docker-compose up -d
           EOF
