@@ -95,6 +95,6 @@ jobs:
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/devops-key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
             set -e
             cd /home/ubuntu
-            docker compose pull
-            docker compose up -d
+            sudo docker-compose pull
+            sudo docker-compose up -d
           EOF
