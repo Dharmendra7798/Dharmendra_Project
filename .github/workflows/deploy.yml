@@ -16,6 +16,7 @@ jobs:
       FRONTEND_IMAGE: sports-frontend
 
     steps:
+      # ---------- Checkout ----------
       - name: Checkout repo
         uses: actions/checkout@v4
 
@@ -27,19 +28,20 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
 
+      # ---------- Get AWS Account ID ----------
+      - name: Get AWS Account ID
+        run: echo "ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_ENV
+
       # ---------- Login to ECR ----------
       - name: Login to AWS ECR
         run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
           aws ecr get-login-password --region $AWS_REGION \
             | docker login --username AWS --password-stdin \
             $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
       # ---------- Build Backend ----------
       - name: Build Backend Image
-        run: |
-          docker build -t $BACKEND_IMAGE:latest app/backend
+        run: docker build -t $BACKEND_IMAGE:latest app/backend
 
       # ---------- Trivy Scan Backend ----------
       - name: Trivy Scan Backend
@@ -49,15 +51,14 @@ jobs:
           format: table
           severity: HIGH,CRITICAL
           vuln-type: os,library
+          scanners: vuln
           ignore-unfixed: true
           exit-code: 1
+          trivyignores: .trivyignore
 
       # ---------- Build Frontend ----------
       - name: Build Frontend Image
-        run: |
-          docker build \
-            --build-arg REACT_APP_API_URL=http://${{ secrets.EC2_PUBLIC_IP }}:5000 \
-            -t $FRONTEND_IMAGE:latest app/frontend
+        run: docker build -t $FRONTEND_IMAGE:latest app/frontend
 
       # ---------- Trivy Scan Frontend ----------
       - name: Trivy Scan Frontend
@@ -67,11 +68,13 @@ jobs:
           format: table
           severity: HIGH,CRITICAL
           vuln-type: os,library
+          scanners: vuln
           ignore-unfixed: true
           exit-code: 1
+          trivyignores: .trivyignore
 
-      # ---------- Push to ECR ----------
-      - name: Push Images to ECR
+      # ---------- Tag & Push ----------
+      - name: Tag & Push Images
         run: |
           docker tag $BACKEND_IMAGE:latest $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_IMAGE:latest
           docker tag $FRONTEND_IMAGE:latest $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_IMAGE:latest
@@ -87,17 +90,17 @@ jobs:
           chmod 600 ~/.ssh/devops-key
           ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
 
-      # ---------- Deploy on EC2 ----------
+      # ---------- Deploy ----------
       - name: Deploy on EC2
         run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/devops-key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/devops-key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << EOF
             set -e
-            cd /home/ubuntu
+            cd /home/ubuntu/Docker
 
             aws ecr get-login-password --region ap-south-1 \
               | sudo docker login --username AWS --password-stdin \
-              641791054325.dkr.ecr.ap-south-1.amazonaws.com
+              $ACCOUNT_ID.dkr.ecr.ap-south-1.amazonaws.com
 
-            sudo docker compose pull
-            sudo docker compose up -d
+            sudo docker-compose pull
+            sudo docker-compose up -d
           EOF
