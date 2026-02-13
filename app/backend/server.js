@@ -14,15 +14,14 @@ const MONGO_URI =
   process.env.MONGODB_URI ||
   "mongodb://mongo:27017/sportsdb";
 
-// Middleware
 app.use(cors({
   origin: "*",
   methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true
 }));
+
 app.use(express.json());
 
-// Routes
 app.use("/api/orders", orderRoutes);
 
 app.get("/", (req, res) => {
@@ -33,7 +32,6 @@ app.get("/health", (req, res) => {
   res.json({ status: "OK", uptime: process.uptime() });
 });
 
-// MongoDB Connection
 mongoose
   .connect(MONGO_URI)
   .then(() => {
@@ -47,10 +45,7 @@ mongoose
     process.exit(1);
   });
 
-// Graceful shutdown
 process.on("SIGTERM", () => {
   console.log("SIGTERM received. Shutting down...");
-  mongoose.connection.close(() => {
-    process.exit(0);
-  });
+  mongoose.connection.close(() => process.exit(0));
 });
