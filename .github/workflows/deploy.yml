@@ -95,7 +95,7 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/devops-key ubuntu@${{ secrets.EC2_PUBLIC_IP }} << EOF
             set -e
-            cd /home/ubuntu/Docker
+            cd /home/ubuntu
 
             aws ecr get-login-password --region ap-south-1 \
               | sudo docker login --username AWS --password-stdin \
