@@ -139,17 +139,11 @@ Backend: http://<EC2_PUBLIC_IP>:5000
 Running services:
 
 Frontend
-
 Backend
-
 MongoDB
-
 Prometheus
-
 Grafana
-
 Node Exporter
-
 cAdvisor
 
 📊 Monitoring & Observability
@@ -208,19 +202,3 @@ Docker	Restart policies added
 Secrets	Environment variables used
 Monitoring	Prometheus + Grafana integrated
 IAM	Least privilege roles
-
-📷 AWS Fixed Deployment Proof
-
-![AWS Fixed](./docs/aws-fixed.png)
-
-📁 Repository Structure
-.
-├── app/
-│   ├── frontend/
-│   └── backend/
-├── docker-compose.yml
-├── terraform/
-├── .github/workflows/deploy.yml
-├── README.md
-
-📽️ Walkthrough Vid
