@@ -40,7 +40,6 @@ Provide proof via screenshots and video walkthrough
 
 ![Architecture Diagram](./docs/architecture.png)
 
-High-Level Architecture Flow:
 User Browser
      |
      v
@@ -64,6 +63,7 @@ Node Exporter + cAdvisor
      v
 CI/CD:
 GitHub → GitHub Actions → AWS ECR → EC2
+
 
 🧰 Tech Stack
 Layer	Tools
